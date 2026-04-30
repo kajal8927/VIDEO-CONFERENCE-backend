@@ -10,7 +10,10 @@ const ALLOWED_ORIGIN = process.env.FRONTEND_URL || "http://localhost:5173";
 
 app.use(
   cors({
-    origin: ALLOWED_ORIGIN,
+    origin:[ "http://localhost:5173",
+     "https://video-conference-ozyy.onrender.com"
+    ],
+    credentials:true
   })
 );
 
@@ -29,10 +32,14 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGIN,
+    origin:[
+       "http://localhost:5173",
+       "https://video-conference-ozyy.onrender.com"
+    ],
     methods: ["GET", "POST"],
   },
 });
+
 app.get('/', (req, res) => {
   res.send('Backend is working!');
 });
