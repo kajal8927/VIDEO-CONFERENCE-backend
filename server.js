@@ -54,105 +54,129 @@ app.get("/", (req, res) => {
 
 app.post("/api/summary", async (req, res) => {
   try {
-    const { roomId, messages = [], speakingStats = {}, meetingDuration = 0, participants = [] } = req.body;
+    const {
+      roomId,
+      messages = [],
+      speakingStats = {},
+      meetingDuration = 0,
+      participants = [],
+    } = req.body || {};
 
     if (!roomId) {
-      return res.status(400).json({ error: "roomId is required" });
+      return res.status(400).json({
+        success: false,
+        message: "roomId is required",
+      });
     }
 
-    const spokenNames = Object.values(speakingStats)
-      .filter((s) => s.totalSpeakingTime > 3000)
-      .map((s) => s.userName);
+    const safeMessages = Array.isArray(messages) ? messages : [];
+    const safeParticipants = Array.isArray(participants) ? participants : [];
+    const safeStats =
+      speakingStats && typeof speakingStats === "object" ? speakingStats : {};
+
+    const meaningfulMessages = safeMessages.filter(
+      (m) => m?.text && String(m.text).trim().length > 2
+    );
+
+    const totalParticipants =
+      safeParticipants.length || Object.keys(safeStats).length || 1;
 
     let dominantSpeaker = null;
     let maxTime = 0;
 
-    for (const stat of Object.values(speakingStats)) {
-      if (stat.totalSpeakingTime > maxTime) {
-        maxTime = stat.totalSpeakingTime;
-        dominantSpeaker = stat.userName;
+    for (const stat of Object.values(safeStats)) {
+      const time = Number(stat?.totalSpeakingTime || 0);
+      if (time > maxTime) {
+        maxTime = time;
+        dominantSpeaker = stat?.userName || "Participant";
       }
     }
 
-    // Determine meaningful messages (basic check: more than 5 chars)
-    const meaningfulMessages = messages.filter((m) => m.text && m.text.trim().length > 5);
-    const hasMeaningfulChat = meaningfulMessages.length > 0;
+    const durationMin = Math.floor(Number(meetingDuration || 0) / 60);
+    const durationSec = Number(meetingDuration || 0) % 60;
 
-    // 1. Overview Generation
-    const totalParticipants = participants.length > 0 ? participants.length : Object.keys(speakingStats).length || 1;
-    let overviewText = `Room ID: ${roomId} • Duration: ${Math.floor(meetingDuration / 60)}m ${meetingDuration % 60}s\n`;
-    overviewText += `Total Participants: ${totalParticipants} • Total Messages: ${messages.length}\n`;
-    
-    if (dominantSpeaker) {
-      overviewText += `Most Active Speaker: ${dominantSpeaker}\n`;
-    }
+    const overview = `Room ID: ${roomId} • Duration: ${durationMin}m ${durationSec}s • Total Participants: ${totalParticipants} • Total Messages: ${safeMessages.length}${
+      dominantSpeaker ? ` • Most Active Speaker: ${dominantSpeaker}` : ""
+    }`;
 
-    if (!hasMeaningfulChat) {
-      overviewText += "\nNo meaningful discussion data available for summary.";
-    }
+    const fullText = meaningfulMessages
+      .map((m) => String(m.text).toLowerCase())
+      .join(" ");
 
-    // 2. Key Points Generation
-    let keyPoints = [];
-    if (hasMeaningfulChat) {
-      const fullText = meaningfulMessages.map((m) => m.text.toLowerCase()).join(" ");
-      const pointsSet = new Set();
-      
-      if (fullText.includes("hello") || fullText.includes("hi") || fullText.includes("hey") || fullText.includes("morning")) {
-        pointsSet.add("Participants introduced themselves");
-      }
-      
-      if (fullText.includes("my name is") || fullText.includes("i am") || fullText.includes("i'm")) {
-        pointsSet.add("Participants shared their identities");
+    const keyPoints = [];
+
+    if (meaningfulMessages.length === 0) {
+      keyPoints.push("No meaningful discussion data available for summary.");
+    } else {
+      if (
+        fullText.includes("hello") ||
+        fullText.includes("hi") ||
+        fullText.includes("hey")
+      ) {
+        keyPoints.push("Participants greeted each other.");
       }
 
-      if (pointsSet.size === 0) {
-        pointsSet.add("Basic conversation took place");
+      if (
+        fullText.includes("my name is") ||
+        fullText.includes("i am") ||
+        fullText.includes("i'm")
+      ) {
+        keyPoints.push("Participants introduced themselves.");
       }
-      
-      pointsSet.add("Initial conversation started");
-      pointsSet.add("Meeting had light engagement");
 
-      // Only show 2-3 meaningful summarized points, clean capitalized strings, no quotes
-      keyPoints = Array.from(pointsSet).slice(0, 3);
+      keyPoints.push("Discussion was based on messages shared during the meeting.");
     }
 
-    // 3. Action Items Generation
-    const actionWords = ["do", "complete", "finish", "submit", "prepare", "send", "schedule", "follow up"];
-    let actionItems = [];
+    const actionWords = [
+      "do",
+      "complete",
+      "finish",
+      "submit",
+      "prepare",
+      "send",
+      "schedule",
+      "follow up",
+    ];
 
-    if (hasMeaningfulChat) {
-      const actionMessages = meaningfulMessages.filter((m) =>
-        actionWords.some((word) => m.text.toLowerCase().includes(word))
+    let actionItems = meaningfulMessages
+      .filter((m) =>
+        actionWords.some((word) =>
+          String(m.text || "").toLowerCase().includes(word)
+        )
+      )
+      .map(
+        (m) =>
+          `${m.senderName || m.sender || "Participant"}: ${String(
+            m.text
+          ).trim()}`
       );
-
-      if (actionMessages.length > 0) {
-        actionItems = actionMessages.map(
-          (m) => `[${m.sender || "Participant"}]: "${m.text}"`
-        );
-      }
-    }
 
     if (actionItems.length === 0) {
       actionItems = ["No action items identified."];
     }
 
-    return res.json({
-      summary: overviewText,
-      keyPoints: keyPoints,
-      actionItems: actionItems,
+    return res.status(200).json({
+      success: true,
+      summary: overview,
+      overview,
+      keyPoints: keyPoints.slice(0, 3),
+      actionItems,
       participantInsights: [
         dominantSpeaker
-          ? `Dominant speaker: ${dominantSpeaker}`
-          : "No clear dominant speaker.",
-        `Total active speakers: ${spokenNames.length}`,
+          ? `Most active speaker: ${dominantSpeaker}`
+          : "No clear dominant speaker identified.",
+        `Total participants: ${totalParticipants}`,
       ],
     });
   } catch (error) {
     console.error("Summary Generation Error:", error);
-    res.status(500).json({ error: "Failed to generate summary" });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to generate summary",
+      error: error.message,
+    });
   }
 });
-
 const server = http.createServer(app);
 
 const io = new Server(server, {
